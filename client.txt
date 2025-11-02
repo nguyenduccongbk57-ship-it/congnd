@@ -1,0 +1,235 @@
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Net.Sockets;
+using System.Text;
+
+namespace ConsoleClient
+{
+    internal static class Program
+    {
+        private const int ConnectTimeoutMs = 4000;
+        private const int ReadTimeoutMs = 5000;
+        private const int WriteTimeoutMs = 3000;
+        private const int PerReadTimeoutMs = 800;
+        private const int IdleGapMs = 300;
+        private const string ConfigFile = "client_config.txt";
+
+        static int Main(string[] args)
+        {
+            Console.OutputEncoding = Encoding.UTF8;
+            Console.InputEncoding = Encoding.UTF8;
+
+            // ===== Read configuration =====
+            if (!File.Exists(ConfigFile))
+            {
+                CreateDefaultConfig();
+                Console.WriteLine("[INFO] Config file 'client_config.txt' created. Edit it then run again.");
+                return 0;
+            }
+
+            string adbDir = "", endpoint = "";
+            foreach (var line in File.ReadAllLines(ConfigFile))
+            {
+                string trimmed = line.Trim();
+                if (trimmed.StartsWith("#") || trimmed.Length == 0) continue;
+
+                int idx = trimmed.IndexOf('=');
+                if (idx < 0) continue;
+
+                string key = trimmed.Substring(0, idx).Trim().ToUpperInvariant();
+                string val = trimmed.Substring(idx + 1).Trim();
+
+                if (key == "ADB_PATH") adbDir = val;
+                else if (key == "SERVER") endpoint = val;
+            }
+
+            if (string.IsNullOrWhiteSpace(adbDir) || string.IsNullOrWhiteSpace(endpoint))
+            {
+                Console.WriteLine("[ERR] Invalid or missing configuration in client_config.txt");
+                return 1;
+            }
+
+            string adbExe = Path.Combine(adbDir, "adb.exe");
+            if (!File.Exists(adbExe))
+            {
+                Console.WriteLine("[ERR] adb.exe not found at: " + adbExe);
+                return 1;
+            }
+
+            if (!TryParseEndpoint(endpoint, out string host, out int port))
+            {
+                Console.WriteLine("[ERR] Invalid SERVER format in config. Expect IP:Port");
+                return 1;
+            }
+
+            TryStartLocalAdbIfNeeded(adbExe, host);
+
+            // ===== Connect & run =====
+            try
+            {
+                using (var tcp = new TcpClient())
+                {
+                    var connectTask = tcp.ConnectAsync(host, port);
+                    if (!connectTask.Wait(ConnectTimeoutMs))
+                        throw new TimeoutException("Connect timeout " + ConnectTimeoutMs + " ms");
+
+                    using (var ns = tcp.GetStream())
+                    {
+                        ns.ReadTimeout = PerReadTimeoutMs;
+                        ns.WriteTimeout = WriteTimeoutMs;
+
+                        string banner = ReadWithIdle(ns, tcp, ReadTimeoutMs);
+                        if (!string.IsNullOrEmpty(banner))
+                            Console.WriteLine("[RECV] " + banner.TrimEnd());
+
+                        while (true)
+                        {
+                            string command = Console.ReadLine() ?? "";
+                            if (string.IsNullOrWhiteSpace(command) || command.Equals("exit", StringComparison.OrdinalIgnoreCase))
+                                break;
+
+                            string payload = command + "\r\n";
+                            byte[] tx = Encoding.ASCII.GetBytes(payload);
+                            ns.Write(tx, 0, tx.Length);
+                            ns.Flush();
+
+                            Console.WriteLine("[SEND] " + EscapeCRLF(payload));
+
+                            string reply = ReadWithIdle(ns, tcp, ReadTimeoutMs);
+                            if (reply.Length > 0)
+                                Console.WriteLine("[RECV] " + reply.TrimEnd());
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("[ERR] " + ex.Message);
+                return 9;
+            }
+
+            return 0;
+        }
+
+        private static void CreateDefaultConfig()
+        {
+            string[] lines =
+            {
+                "# ConsoleClient configuration",
+                "# Modify ADB_PATH and SERVER below, then run again.",
+                "ADB_PATH=H:\\C#PJ\\KaiDev\\adb\\bin\\Debug",
+                "SERVER=192.168.1.126:20001"
+            };
+            File.WriteAllLines(ConfigFile, lines, Encoding.UTF8);
+        }
+
+        private static string ReadWithIdle(NetworkStream ns, TcpClient tcp, int totalBudgetMs)
+        {
+            var sb = new StringBuilder();
+            var buf = new byte[4096];
+            ns.ReadTimeout = PerReadTimeoutMs;
+
+            var started = DateTime.UtcNow;
+            bool gotAny = false;
+            int lastBytesAtMs = 0;
+
+            while (true)
+            {
+                int elapsed = (int)(DateTime.UtcNow - started).TotalMilliseconds;
+                if (elapsed >= totalBudgetMs) break;
+
+                try
+                {
+                    int read = ns.Read(buf, 0, buf.Length);
+                    if (read > 0)
+                    {
+                        gotAny = true;
+                        sb.Append(Encoding.ASCII.GetString(buf, 0, read));
+                        lastBytesAtMs = (int)(DateTime.UtcNow - started).TotalMilliseconds;
+
+                        while (tcp.Available > 0)
+                        {
+                            read = ns.Read(buf, 0, buf.Length);
+                            if (read <= 0) break;
+                            gotAny = true;
+                            sb.Append(Encoding.ASCII.GetString(buf, 0, read));
+                            lastBytesAtMs = (int)(DateTime.UtcNow - started).TotalMilliseconds;
+                        }
+                        continue;
+                    }
+                    break;
+                }
+                catch (IOException)
+                {
+                    if (gotAny)
+                    {
+                        int nowMs = (int)(DateTime.UtcNow - started).TotalMilliseconds;
+                        if (nowMs - lastBytesAtMs >= IdleGapMs) break;
+                    }
+                }
+            }
+
+            return sb.ToString();
+        }
+
+        private static bool TryParseEndpoint(string s, out string host, out int port)
+        {
+            host = "";
+            port = 0;
+            var parts = s.Split(':');
+            if (parts.Length != 2) return false;
+            host = parts[0].Trim();
+            return int.TryParse(parts[1], out port) && port > 0 && port <= 65535;
+        }
+
+        private static void TryStartLocalAdbIfNeeded(string adbExe, string host)
+        {
+            try
+            {
+                if (IsLocalHost(host) && !IsProcessRunning("adb"))
+                {
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = adbExe,
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        WindowStyle = ProcessWindowStyle.Hidden
+                    };
+                    Process.Start(psi);
+                    System.Threading.Thread.Sleep(300);
+                }
+            }
+            catch { }
+        }
+
+        private static bool IsLocalHost(string host)
+        {
+            if (string.IsNullOrWhiteSpace(host)) return false;
+            var h = host.Trim().ToLowerInvariant();
+            return h == "localhost" || h == "127.0.0.1" || h == "::1";
+        }
+
+        private static bool IsProcessRunning(string procNameNoExt)
+        {
+            try
+            {
+                var procs = Process.GetProcessesByName(procNameNoExt);
+                return procs != null && procs.Length > 0;
+            }
+            catch { return false; }
+        }
+
+        private static string EscapeCRLF(string s)
+        {
+            var sb = new StringBuilder(s.Length + 16);
+            foreach (char c in s)
+            {
+                if (c == '\r') sb.Append("\\r");
+                else if (c == '\n') sb.Append("\\n");
+                else sb.Append(c);
+            }
+            return sb.ToString();
+        }
+    }
+}

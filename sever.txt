@@ -1,0 +1,119 @@
+using System;
+using System.IO;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace ConsoleServer472
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            // BỎ UTF-8: không đụng tới Console.OutputEncoding / InputEncoding
+            // Console sẽ dùng system code page (ANSI/CP437 tùy máy)
+
+            int port = 20001; // Default port
+            if (args.Length > 0 && int.TryParse(args[0], out int p))
+                port = p;
+
+            Console.WriteLine("=========================================");
+            Console.WriteLine("[SERVER] Machine IP addresses:");
+            Console.WriteLine(GetLocalIPAddresses());
+            Console.WriteLine("=========================================");
+            Console.WriteLine("[SERVER] Listening on port {0}", port);
+            Console.WriteLine("[HINT]   Try: telnet <one of IPs above> {0}\n", port);
+
+            var listener = new TcpListener(IPAddress.Any, port);
+            listener.Start();
+
+            Console.WriteLine("[SERVER] Waiting for clients...");
+
+            while (true)
+            {
+                try
+                {
+                    var client = listener.AcceptTcpClient();
+                    Task.Run(() => HandleClient(client));
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("[SERVER] Error: " + ex.Message);
+                }
+            }
+        }
+
+        static void HandleClient(TcpClient client)
+        {
+            var ep = (IPEndPoint)client.Client.RemoteEndPoint;
+            Console.WriteLine("[CONNECT] {0}:{1}", ep.Address, ep.Port);
+
+            try
+            {
+                client.NoDelay = true;
+                using (var ns = client.GetStream())
+                {
+                    ns.ReadTimeout = 60000;
+                    ns.WriteTimeout = 60000;
+
+                    // BỎ UTF-8: dùng ASCII cho socket để tránh ký tự lạ khi client không hỗ trợ Unicode
+                    var enc = Encoding.ASCII;
+
+                    using (var reader = new StreamReader(ns, enc, detectEncodingFromByteOrderMarks: false, bufferSize: 1024, leaveOpen: true))
+                    using (var writer = new StreamWriter(ns, enc, 1024, leaveOpen: true) { AutoFlush = true })
+                    {
+                        // đảm bảo \r\n cho telnet/netcat
+                        writer.NewLine = "\r\n";
+
+                        // Greeting chỉ dùng ASCII
+                        string greeting = "EchoServer ready. Type and press Enter.";
+                        writer.WriteLine(greeting);
+                        Console.WriteLine("[SEND] {0}:{1} <- {2}", ep.Address, ep.Port, greeting);
+
+                        string line;
+                        while ((line = reader.ReadLine()) != null)
+                        {
+                            Console.WriteLine("[RECV] {0}:{1} -> {2}", ep.Address, ep.Port, line);
+
+                            // Echo lại cho client
+                            writer.WriteLine(line);
+                            Console.WriteLine("[SEND] {0}:{1} <- {2}", ep.Address, ep.Port, line);
+                        }
+                    }
+                }
+            }
+            catch (IOException)
+            {
+                // Client ngắt kết nối
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("[SERVER] Error with {0}:{1} -> {2}", ep.Address, ep.Port, ex.Message);
+            }
+            finally
+            {
+                Console.WriteLine("[DISCONNECT] {0}:{1}", ep.Address, ep.Port);
+                try { client.Close(); } catch { }
+            }
+        }
+
+        static string GetLocalIPAddresses()
+        {
+            var sb = new StringBuilder();
+            foreach (var ni in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up)
+                    continue;
+
+                var ipProps = ni.GetIPProperties();
+                foreach (var ua in ipProps.UnicastAddresses)
+                {
+                    if (ua.Address.AddressFamily == AddressFamily.InterNetwork)
+                        sb.AppendLine(" - " + ua.Address);
+                }
+            }
+            return sb.ToString();
+        }
+    }
+}

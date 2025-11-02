@@ -1,0 +1,250 @@
+// FakeAdb.cs
+// Minimal adb shim that forwards "adb -s <ip:port> shell <command...>"
+// to a TCP server at <ip:port>, reads single-line response and prints it.
+// Also supports simple: version, start-server, connect <ip:port>, devices, disconnect
+//
+// Build: create Console App (.NET Framework 4.7.2) and replace Program.cs with this file.
+
+using System;
+using System.IO;
+using System.Linq;
+using System.Net.Sockets;
+using System.Text;
+
+class FakeAdb
+{
+    // persistent state file to store last "connected" endpoint (optional)
+    static readonly string StateFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "adb_shim_state.txt");
+
+    static int Main(string[] args)
+    {
+        if (args == null || args.Length == 0)
+        {
+            Console.WriteLine("adb (fake) - supported: version, start-server, connect, disconnect, devices, -s <ip:port> shell <cmd>");
+            return 0;
+        }
+
+        string cmd = args[0].ToLowerInvariant();
+
+        try
+        {
+            // quick helpers
+            if (cmd == "version")
+            {
+                Console.WriteLine("Android Debug Bridge version 1.0.41 (fake-shim)");
+                return 0;
+            }
+            if (cmd == "start-server")
+            {
+                Console.WriteLine("adb server started (fake-shim)");
+                return 0;
+            }
+            if (cmd == "connect" && args.Length >= 2)
+            {
+                File.WriteAllText(StateFile, args[1], Encoding.UTF8);
+                Console.WriteLine($"connected to {args[1]} (fake)");
+                return 0;
+            }
+            if (cmd == "disconnect")
+            {
+                if (args.Length >= 2)
+                {
+                    string ep = args[1];
+                    if (File.Exists(StateFile) && File.ReadAllText(StateFile).Trim() == ep)
+                    {
+                        File.Delete(StateFile);
+                        Console.WriteLine($"disconnected {ep}");
+                        return 0;
+                    }
+                    Console.WriteLine($"no such connection: {ep}");
+                    return 1;
+                }
+                else
+                {
+                    if (File.Exists(StateFile)) File.Delete(StateFile);
+                    Console.WriteLine("disconnected.");
+                    return 0;
+                }
+            }
+            if (cmd == "devices")
+            {
+                Console.WriteLine("List of devices attached");
+                if (File.Exists(StateFile))
+                {
+                    Console.WriteLine($"{File.ReadAllText(StateFile).Trim()}\tdevice (fake)");
+                }
+                return 0;
+            }
+
+            // Now handle "shell" forwarding pattern:
+            // Accept forms:
+            //   adb -s <ip:port> shell <command...>
+            //   adb shell <command...>   (uses connected endpoint from 'connect' if any)
+            // We will parse args accordingly.
+
+            // find "-s" if present
+            string endpoint = null;
+            int idx = 0;
+
+            if (args.Length > 1 && args[0] == "-s")
+            {
+                // pattern: adb -s <endpoint> shell ...
+                if (args.Length >= 3)
+                {
+                    endpoint = args[1];
+                    idx = 2; // next expected token should be 'shell'
+                }
+                else
+                {
+                    Console.Error.WriteLine("error: malformed -s usage");
+                    return 1;
+                }
+            }
+            else if (args[0] == "shell")
+            {
+                // pattern: adb shell <command...>
+                idx = 0; // args[0] is 'shell'
+            }
+            else
+            {
+                // maybe user invoked: adb -s <ep> <other commands> -> we only support shell here
+                // check if args contain -s anywhere
+                int sPos = Array.IndexOf(args, "-s");
+                if (sPos >= 0 && sPos + 1 < args.Length)
+                {
+                    endpoint = args[sPos + 1];
+                    // find 'shell' token after that
+                    int shellPos = Array.IndexOf(args, "shell", sPos + 2);
+                    if (shellPos >= 0)
+                    {
+                        idx = shellPos;
+                    }
+                    else
+                    {
+                        Console.Error.WriteLine("unsupported command pattern. only 'shell' forwarding implemented.");
+                        return 1;
+                    }
+                }
+                else
+                {
+                    // maybe first token is 'shell'
+                    if (args[0] == "shell")
+                    {
+                        idx = 0;
+                    }
+                    else
+                    {
+                        Console.Error.WriteLine("unsupported adb command (fake-shim).");
+                        return 1;
+                    }
+                }
+            }
+
+            // if idx token should be 'shell'
+            if (idx < args.Length && args[idx] == "shell")
+            {
+                // compute command text: concat remaining args after 'shell'
+                var cmdParts = args.Skip(idx + 1).ToArray();
+                if (cmdParts.Length == 0)
+                {
+                    Console.Error.WriteLine("error: missing shell command");
+                    return 1;
+                }
+                string shellCommand = string.Join(" ", cmdParts);
+
+                // determine endpoint: if not provided via -s, try state file
+                if (string.IsNullOrWhiteSpace(endpoint))
+                {
+                    if (File.Exists(StateFile))
+                    {
+                        endpoint = File.ReadAllText(StateFile).Trim();
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(endpoint))
+                {
+                    Console.Error.WriteLine("error: no endpoint specified. use '-s <ip:port>' or 'adb connect <ip:port>' first.");
+                    return 1;
+                }
+
+                // forward shellCommand to endpoint over TCP
+                return ForwardToServer(endpoint, shellCommand);
+            }
+
+            Console.Error.WriteLine("unsupported pattern or command.");
+            return 1;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("Error: " + ex.Message);
+            return 2;
+        }
+    }
+
+    // Forward the command string to the server at endpoint (ip:port),
+    // send as UTF8 + newline, then read single-line response (or until socket close) and print it.
+    static int ForwardToServer(string endpoint, string command)
+    {
+        // endpoint format: ip:port
+        var parts = endpoint.Split(new[] { ':' }, 2);
+        if (parts.Length != 2 || !int.TryParse(parts[1], out int port))
+        {
+            Console.Error.WriteLine("error: invalid endpoint format (expected ip:port).");
+            return 1;
+        }
+
+        string host = parts[0];
+
+        try
+        {
+            using (var client = new TcpClient())
+            {
+                // short connect timeout
+                var ar = client.BeginConnect(host, port, null, null);
+                bool ok = ar.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(5));
+                if (!ok || !client.Connected)
+                {
+                    Console.Error.WriteLine($"error: cannot connect to {endpoint}");
+                    return 1;
+                }
+                client.EndConnect(ar);
+
+                using (var ns = client.GetStream())
+                {
+                    ns.ReadTimeout = 5000;
+                    ns.WriteTimeout = 5000;
+
+                    // send command + newline
+                    byte[] outBuf = Encoding.UTF8.GetBytes(command + "\n");
+                    ns.Write(outBuf, 0, outBuf.Length);
+                    ns.Flush();
+
+                    // read response (read until newline or stream end)
+                    var ms = new MemoryStream();
+                    var buffer = new byte[1024];
+                    int read;
+                    while ((read = ns.Read(buffer, 0, buffer.Length)) > 0)
+                    {
+                        ms.Write(buffer, 0, read);
+                        // check if buffer contains newline
+                        if (ms.Length > 0 && ms.ToArray().Contains((byte)'\n'))
+                            break;
+                        // small safety: cap read length
+                        if (ms.Length > 10 * 1024 * 1024) break;
+                    }
+
+                    // convert to string and trim trailing newline
+                    string resp = Encoding.UTF8.GetString(ms.ToArray()).TrimEnd('\r', '\n');
+                    // print server reply to stdout
+                    Console.WriteLine(resp);
+                    return 0;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("Forward error: " + ex.Message);
+            return 2;
+        }
+    }
+}
