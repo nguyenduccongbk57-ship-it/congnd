@@ -1,0 +1,514 @@
+void __fastcall PLC_Deal::Execute()
+{
+    SetName();
+    //---- Place thread code here ----
+
+    //K1DUT_IN:GT542A035075002V
+    if(PLC_RecvData.Trim() == ":")
+    {
+        AnsiString fix_number = "";
+        strPLC_DSN= "";
+        fix_number = GetSubstringByFormat(PLC_RecvData,":",0);
+        strPLC_DSN = GetSubstringByFormat(PLC_RecvData,":",1).Trim();
+        Form1->lb_runtime->Caption = "0";
+        Form1->gIsTest = true;
+        Form1->DisableUI(Form1->gIsTest);
+        Form1->Edit_kb_DSN->Text = "";
+        Form1->strPSN = "";
+        Form1->Red_fix->Lines->Add("Robot-->TE:"+PLC_RecvData.Trim());
+
+        if(strPLC_DSN.Length() !=16)
+        {
+            Test_Status = "FAIL";
+            Form1->Test_StatusShow(Test_Status);
+            Form1->gIsTest = false;
+            Form1->DisableUI(Form1->gIsTest);
+            return;
+        }
+        Form1->Edit_kb_DSN->Text = strPLC_DSN;
+        
+        Test_Status = "CLOSE";
+        Form1->Test_StatusShow(Test_Status);
+
+
+        //Form1->Timer_close->Enabled = true;
+        Form1->bfixclose = false;
+
+        if(!Form1->FixWriteSocketorComData_WaitFor(Form1->fix_close.c_str(),Form1->fix_close_return.c_str(),8,0,true,!Form1->com_Isused,2))
+        {
+            Test_Status = "ERRO";;
+            Form1->Test_StatusShow(Test_Status);
+            Form1->gIsTest = false;
+            Form1->DisableUI(Form1->gIsTest);
+            return;
+        }
+
+
+        Test_Status = "TEST";
+        Form1->Test_StatusShow(Test_Status);
+        if(Form1->IsneedCal)
+        {
+            Form1->startCal = true;
+        }
+        Form1->btn_starttest->Click();
+        return;
+
+    }
+    else if(PLC_RecvData.Trim() == "ASK#")
+    {
+        if(!Form1->gIsTest && (Test_Status != "OPEN") && (Test_Status != "TEST") && (Test_Status != "ERRO"))
+        {
+            Form1->fix_busy = true;
+            Form1->check_route = false;
+            AnsiString fix_state_temp = "";
+            /*if(Form1->com_Isused)
+            {
+                if(Form1->FixWriteCommData_WaitForExpOrNo(Form1->fix_product.c_str(),Form1->fix_product_returnNG.c_str(),Form1->fix_product_returnOK.c_str(),3))
+                {
+                    Test_Status = "IDEL";
+                }
+
+            }
+            else
+            { */
+                /*fix_state_temp = Form1->FixWriteSocketorComData_WaitForState(Form1->fix_product.c_str(),Form1->fix_state_return,3,0,true,!Form1->com_Isused,1);
+                Fix_Status = GetSubstringByFormat_total(fix_state_temp.c_str(),0).Trim();
+                if(fix_state_temp.Pos(Form1->fix_product_returnNG.c_str()))
+                {
+                    Test_Status = "IDEL,"+Fix_Status;
+                }
+                else if(fix_state_temp.Pos(Form1->fix_product_returnOK.c_str()))
+                {
+                    if(Test_Status.SubString(1,4).Pos("IDEL"))
+                    {
+                        Test_Status = "FAIL,"+ Fix_Status;
+                    }
+                    else
+                    {
+                        Test_Status = Test_Status.SubString(1,4) +","+ Fix_Status;
+                    }
+                }
+                else
+                {
+                    Test_Status = "ERRO,"+ Fix_Status;
+                }*/
+                /*if(Form1->FixWriteSocketData_WaitForExpOrNo(Form1->fix_product.c_str(),Form1->fix_product_returnNG.c_str(),Form1->fix_product_returnOK.c_str(),3))
+                {
+                    Test_Status = "IDEL";
+                }*/
+            //}
+            Form1->Test_StatusShow(Test_Status);
+        }
+        AnsiString strStatus = "STATE:"+ Form1->PLC_Cell_NUM +"-"+ Test_Status+ "#";
+        if(Test_Status.Pos("DONE"))
+        {
+            strStatus = "STATE:"+ Form1->PLC_Cell_NUM +"-CALI_"+ Test_Status+ "#";
+        }
+        else if(Form1->IsneedCal)
+        {
+            strStatus = "STATE:"+ Form1->PLC_Cell_NUM +"-CALI_"+ Test_Status+ "#";
+        }
+        Form1->ServerSocket1SendText(PLC_RecvIP,PLC_RemotePort,strStatus,!Form1->gIsTest);
+        Form1->fix_busy = false;
+        return;
+    }
+    else if((!Test_Status.Pos("TEST")) && PLC_RecvData.Pos("START") && PLC_RecvData.Pos(Form1->PLC_Cell_NUM) && !Form1->gIsTest)
+    {
+        Form1->lb_runtime->Caption = "0";
+        Form1->gIsTest = true;
+        Form1->DisableUI(Form1->gIsTest);
+        Form1->Edit_kb_DSN->Text = "";
+        Form1->strPSN = "";
+        Form1->Red_fix->Lines->Add("Robot-->TE:"+PLC_RecvData.Trim());
+        //if(Form1->stationName == "AFT")
+        //{
+            strPLC_DSN= "";
+            strPLC_DSN = GetSubstringFromStringA(PLC_RecvData,"-","#",true);
+            if(strPLC_DSN.Length() !=16)
+            {
+                Test_Status = "FAIL";
+                Form1->Test_StatusShow(Test_Status);
+                Form1->gIsTest = false;
+                Form1->DisableUI(Form1->gIsTest);
+                return;
+            }
+            Form1->Edit_kb_DSN->Text = strPLC_DSN;
+        //}
+        AnsiString str_msg = "OK"+ Form1->PLC_Cell_NUM +"#";
+        Form1->ServerSocket1SendText(PLC_RecvIP,PLC_RemotePort,str_msg);
+        Test_Status = "CLOSE";
+        Form1->Test_StatusShow(Test_Status);
+        if(Form1->sample_SNList_temp.Pos(strPLC_DSN))
+        {
+            Form1->change_SFCON = 0;
+            if((Form1->stationName == "AFT" || Form1->stationName == "FTS"))
+            {
+                //strkazam.sprintf("CMD=StartOne|Slot=1|SN=%s\r\n",this->Edit_kb_DSN->Text);
+                //strkazam.sprintf("CMD=StartAll|PanelSN=%s\r\n",this->Edit_kb_DSN->Text);
+                /*AnsiString strkazam = "";
+                strkazam.sprintf("CMD=SetSFC|SFC=OFF\r\n") ;
+                Form1->ClientSocket1->Socket->SendText(strkazam);
+                Form1->red_PLC->Lines->Add("TE-->kazam:"+strkazam );
+                Form1->DisableUI(Form1->gIsTest);
+                Form1->btn_starttest->Enabled = false;*/
+                TObject *Sender;
+                Form1->rb_sfcoffClick(Sender);
+            }
+        }
+        else
+        {
+            Form1->change_SFCON++;
+            if(Form1->change_SFCON<3)
+            {
+                /*AnsiString strkazam = "";
+                strkazam.sprintf("CMD=SetSFC|SFC=ON\r\n") ;
+                Form1->ClientSocket1->Socket->SendText(strkazam);
+                Form1->red_PLC->Lines->Add("TE-->kazam:"+strkazam );
+                Form1->DisableUI(Form1->gIsTest);
+                Form1->btn_starttest->Enabled = false; */
+                TObject *Sender;
+                Form1->rb_sfconClick(Sender);
+            }
+        }
+
+
+        //Form1->Timer_close->Enabled = true;
+        Form1->bfixclose = false;
+        //if(!Form1->FixWriteSocketorComData_WaitFor(Form1->fix_close.c_str(),Form1->fix_close_return.c_str(),12,0,true,!Form1->com_Isused))
+        //{
+            if(!Form1->FixWriteSocketorComData_WaitFor(Form1->fix_close.c_str(),Form1->fix_close_return.c_str(),8,0,true,!Form1->com_Isused,2))
+            {
+                Test_Status = "ERRO";;
+                Form1->Test_StatusShow(Test_Status);
+                Form1->gIsTest = false;
+                Form1->DisableUI(Form1->gIsTest);
+                return;
+            }
+        //}
+        /*if(!Form1->FixWriteSocketorComData_WaitFor(Form1->fix_poweron.c_str(),Form1->fix_returnon.c_str(),8,0,true,!Form1->com_Isused,2))
+        {
+            Test_Status = "ERRO";;
+            Form1->Test_StatusShow(Test_Status);
+            Form1->gIsTest = false;
+            Form1->DisableUI(Form1->gIsTest);
+            return;
+        } */
+        Test_Status = "TEST";
+        Form1->Test_StatusShow(Test_Status);
+        Form1->CheckandOpenSfisTerminal();
+        Form1->Delay(300);
+        Form1->PLCClientSocketSendText(Test_Status);
+        /*if(Form1->rb_sfcon->Checked)
+        {
+            if(Form1->Edit_kb_DSN->Text.Trim().Length()>0)
+            {
+                if(Form1->CheckSfisStatus())
+                {
+                    Form1->bquerysfis = false;
+                    return;
+                }
+                else
+                {
+                    Form1->bquerysfis = false;
+                    if(Form1->bstationerror)
+                    {
+                        Form1->bstationerror = false;
+                        return;
+                    }
+                }
+            }
+            else
+            {
+                if(!Form1->GetDSN())
+                {
+                    if(!Form1->GetDSN())
+                    {
+                        if(Form1->adb_failcount>4)
+                        {
+                            Form1->adb_failcount = 0;
+                            Test_Status = "ERRO#";
+                        }
+                        else
+                        {
+                            Test_Status = "FAIL#";
+                        }
+                        Form1->Test_StatusShow(Test_Status);
+                        Form1->gIsTest = false;
+                        Form1->DisableUI(Form1->gIsTest);
+                        return;
+                    }
+                    else
+                    {
+                        if(Form1->CheckSfisStatus())
+                        {
+                            Form1->bquerysfis = false;
+                            return;
+                        }
+                        else
+                        {
+                            Form1->bquerysfis = false;
+                            if(Form1->bstationerror)
+                            {
+                                Form1->bstationerror = false;
+                                return;
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    if(Form1->CheckSfisStatus())
+                    {
+                        Form1->bquerysfis = false;
+                        return;
+                    }
+                    else
+                    {
+                        Form1->bquerysfis = false;
+                        if(Form1->bstationerror)
+                        {
+                            Form1->bstationerror = false;
+                            return;
+                        }
+                    }
+                }
+
+            }
+        } */
+        if(Form1->IsneedCal)
+        {
+            Form1->startCal = true;
+        }
+        Form1->btn_starttest->Click();
+        return;
+    }
+    else if(PLC_RecvData.Pos("FIN:") && PLC_RecvData.Pos(Form1->PLC_Cell_NUM))
+    {
+        AnsiString str_msg = "OK"+ Form1->PLC_Cell_NUM +"#";
+        Form1->ServerSocket1SendText(PLC_RecvIP,PLC_RemotePort,str_msg);
+
+        Test_Status = "OPEN";
+
+        Form1->Test_StatusShow(Test_Status);
+        //this->Timer_fin->Enabled = true;
+        bool noproduct = false ;
+        /*AnsiString empty_in = "empty in\r\n";
+        AnsiString empty_in_return = "EMPTY IN OK"; */
+        /*if(Form1->com_Isused)
+        {
+            if(Form1->FixWriteCommData_WaitForExpOrNo(Form1->fix_product.c_str(),Form1->fix_product_returnNG.c_str(),Form1->fix_product_returnOK.c_str(),3))
+            {
+                noproduct = true;
+            }
+            else
+            {
+                if(Form1->FixWriteCommData_WaitForExpOrNo(Form1->fix_product.c_str(),Form1->fix_product_returnNG.c_str(),Form1->fix_product_returnOK.c_str(),3))
+                {
+                    noproduct = true;
+                }
+                else
+                {
+                    noproduct = false;
+                }
+            }
+        }
+        else
+        {
+            if(Form1->FixWriteSocketData_WaitForExpOrNo(Form1->fix_product.c_str(),Form1->fix_product_returnNG.c_str(),Form1->fix_product_returnOK.c_str(),3))
+            {
+                noproduct = true;
+            }
+            else
+            {
+                if(Form1->FixWriteSocketData_WaitForExpOrNo(Form1->fix_product.c_str(),Form1->fix_product_returnNG.c_str(),Form1->fix_product_returnOK.c_str(),3))
+                {
+                    noproduct = true;
+                }
+                else
+                {
+                    noproduct = false;
+                }
+            }
+        } */
+        AnsiString fix_state_temp;
+        fix_state_temp = Form1->FixWriteSocketorComData_WaitForState(Form1->fix_product.c_str(),Form1->fix_state_return,3,0,true,!Form1->com_Isused,1);
+        Fix_Status = GetSubstringByFormat_total(fix_state_temp.c_str(),0).Trim();
+        if(fix_state_temp.Pos(Form1->fix_product_returnNG.c_str()))
+        {
+            noproduct = true;
+        }
+        else if(fix_state_temp.Pos(Form1->fix_product_returnOK.c_str()))
+        {
+            noproduct = false;
+        }
+        else
+        {
+            Test_Status = "ERRO";
+        }
+        if(Form1->FixWriteSocketorComData_WaitFor(Form1->fix_close.c_str(),Form1->fix_close_return.c_str(),8,0,true,!Form1->com_Isused,2))
+        {
+            Fix_Status = "CLOSE";
+            if(Test_Status != "ERRO")
+            {
+                if(noproduct)
+                {
+                    Test_Status = "IDEL";
+                }
+                else
+                {
+                    Test_Status = "FAIL";
+                }
+            }
+            Form1->Test_StatusShow(Test_Status);
+        }
+        else
+        {
+            Test_Status = "ERRO";
+            Form1->Test_StatusShow(Test_Status);
+        }
+        Form1->PLCClientSocketSendText(Test_Status);
+        return;
+    }
+    else if(PLC_RecvData.Trim().Pos("OPEN") && !Form1->check_route)
+    {
+        /*Form1->Red_fix->Clear();
+        Form1->red_PLC->Clear();*/
+
+        AnsiString str_msg = "OK"+ Form1->PLC_Cell_NUM +"#";
+        Form1->ServerSocket1SendText(PLC_RecvIP,PLC_RemotePort,str_msg);
+        if((Test_Status != "TEST" ) && !Form1->gIsTest)
+        {
+
+            /*if(!Form1->FixWriteSocketData_WaitFor("Relay2_OFF\r\n","OFF",8,true))
+            {
+                Form1->Red_fix->Lines->Add("#### Second DUT Power OFF ####");
+                try
+                {
+                    Form1->FixWriteSocketData_WaitFor("Relay2_OFF\r\n","OFF",6,true);
+                }
+                catch(...)
+                {
+                    Form1->Red_fix->Lines->Add("Error, Send Fixture <Relay2_OFF> CMD Error!");
+                }
+            }*/
+            //this->Timer_open->Enabled = true;
+            Form1->bfixopen = false;
+            Form1->check_route = true;
+            if(!Form1->FixWriteSocketorComData_WaitFor(Form1->fix_open.c_str(),Form1->fix_open_return.c_str(),12,0,true,!Form1->com_Isused,2))
+            {
+                /*Form1->Red_fix->Lines->Add("Ready ReOpen CommFix!");
+                try
+                {
+                    Form1->FixWriteSocketorComData_WaitFor(Form1->fix_open.c_str(),Form1->fix_open_return.c_str(),12,0,true,!Form1->com_Isused);
+                }
+                catch(...)
+                {
+                    Form1->Red_fix->Lines->Add("Error,ReOpen CommFix Fail!");
+                }*/
+
+            }
+            return;
+
+           // this->fixclose = false;
+        }
+        else
+        {
+            Form1->Red_fix->Lines->Add("Warning ,Program is testing ,cant open Fixture!");
+            return;
+        }
+    }
+    else if(PLC_RecvData.Pos("CHECK#") && Form1->check_route)
+    {
+        for(int j=0;j<40;j++)
+        {
+            if(Form1->bfixopen)
+            {
+                AnsiString str_msg = "DONE"+ Form1->PLC_Cell_NUM +"#";
+                Form1->ServerSocket1SendText(PLC_RecvIP,PLC_RemotePort,str_msg);
+                Form1->check_route = false;
+                return;
+            }
+            Sleep(300);
+        }
+        Form1->red_PLC->Lines->Add("Warning,the Fixture Open timeout");
+        return;
+    }
+    else if(PLC_RecvData.Pos("BOARD#"))
+    {
+        if(Form1->com_Isused)
+        {
+            if(Form1->FixWriteCommData_WaitForExpOrNo(Form1->fix_product.c_str(),Form1->fix_product_returnNG.c_str(),Form1->fix_product_returnOK,3))
+            {
+                AnsiString str_msg = "NOBOARD#";
+                Form1->ServerSocket1SendText(PLC_RecvIP,PLC_RemotePort,str_msg);
+            }
+            else
+            {
+                AnsiString str_msg = "BOARD#";
+                Form1->ServerSocket1SendText(PLC_RecvIP,PLC_RemotePort,str_msg);
+            }
+        }
+        else
+        {
+            if(Form1->FixWriteSocketData_WaitForExpOrNo(Form1->fix_product.c_str(),Form1->fix_product_returnNG.c_str(),Form1->fix_product_returnOK,3))
+            {
+                AnsiString str_msg = "NOBOARD#";
+                Form1->ServerSocket1SendText(PLC_RecvIP,PLC_RemotePort,str_msg);
+            }
+            else
+            {
+                if(Form1->FixWriteSocketData_WaitForExpOrNo(Form1->fix_product.c_str(),Form1->fix_product_returnNG.c_str(),Form1->fix_product_returnOK,3))
+                {
+                    AnsiString str_msg = "NOBOARD#";
+                    Form1->ServerSocket1SendText(PLC_RecvIP,PLC_RemotePort,str_msg);
+                }
+                else
+                {
+                    AnsiString str_msg = "BOARD#";
+                    Form1->ServerSocket1SendText(PLC_RecvIP,PLC_RemotePort,str_msg);
+                }
+            }
+        }
+    }
+
+
+}
+//---------------------------
+
+
+
+ROBOT-->TE:ASK#
+TE-->ROBOT:STATE:<cell>-<Test_Status>#   
+Test_Status: TEST OPEN ERRO IDLE CLOSE
+
+ROBOT-->TE:START:<CellNum>-<DSN>#
+DSN!=16 -> 
+TE-->ROBOT:OK<CellNum>#
+
+
+ROBOT-->TE:OPEN#
+TE-->ROBOT:OK<CellNum>#
+
+
+
+(1) PLC ¡÷ TE : ASK#
+(2) TE  ¡÷ PLC: STATE:<cell>-<IDLE|TEST|ERRO>#
+
+(3) PLC ¡÷ TE : OPEN#
+(4) TE  ¡÷ PLC: OK<cell>#
+     TE: g?i l?nh fix_open ¡÷ ch? fix_open_return, set bfixopen=true
+(5) PLC ¡÷ TE : CHECK#
+(6) TE  ¡÷ PLC: DONE<cell>#   (khi bfixopen==true)
+
+(7) PLC ¡÷ TE : START:<cell>-<DSN16>#
+(8) TE  ¡÷ PLC: OK<cell>#
+     TE: Test_Status=CLOSE ¡÷ g?i fix_close ¡÷ ch? fix_close_return
+     TE: Test_Status=TEST ¡÷ (m? terminal SFIS) ¡÷ g?i STATE:<cell>-TEST#
+     TE: Start Kazam (btn_starttest)
+
+(9) Kazam ¡÷ TE: PASS / FAIL
+(10)TE  ¡÷ PLC: STATE:<cell>-PASS# ho?c STATE:<cell>-FAIL#
+
+(11)PLC ¡÷ TE : FIN:<DSN>#
+(12)TE:   ki?m tra fixture tr?ng (fix_product ¡÷ OK/NG), g?i fix_open n?u c?n
+(13)TE  ¡÷ PLC: STATE:<cell>-IDLE#   (k?t thuc chu k?)
