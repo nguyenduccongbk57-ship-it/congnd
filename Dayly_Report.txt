@@ -1,0 +1,63 @@
+Date	No	Content	Result/Outcome
+17/10	
+        1	New Employee Induction & Company Regulations Training	Completed personal documents, signed the employment contract, and received the employee ID card.
+18/10	
+        1	New Employee Induction & Company Regulations Training	Understood the general company regulations and workplace policies of Foxconn.
+20/10	
+        1	New Employee Induction & Company Regulations Training	Completed all new employee assessments, finished the training program, and returned to the assigned department.
+21/10	
+        1	Attended the department’s morning meeting.	
+		    Result/Outcome: Updated daily task status and learned work coordination in the team.
+	    2	Initial familiarization and overall inspection of the testing system on the 3rd floor.	
+		    Result/Outcome: Gained a general understanding of the testing system layout, equipment arrangement, and operation workflow on the 3rd floor.
+	    3	Studied the documentation and technical materials of the Kazam software.	
+		    Result/Outcome: Understood the core functions, script structure, and plugin extension mechanism of the Kazam software.
+22/10	
+        1	Attended the department’s morning meeting.	
+		    Result/Outcome: Updated daily task status and learned work coordination in the team.
+	    2	Became familiar with the remote control and connection system between test stations and the personal PC.	
+		    Result/Outcome: Successfully connected to and controlled multiple test stations through remote access.
+	    3	Set up Visual Studio environment on the personal PC.	
+		    Result/Outcome: Visual Studio installed and configured successfully; ready for developing and debugging C# projects.
+	    4	Referred to and analyzed the C# project on the Calgary_BFT test system.	
+		    Result/Outcome: Understood the project’s structure, source code organization, and logic flow of the C# application used on the Calgary_BFT test system.
+	    5	Updated the ERRORCODE_INFO.csv file and recalculated the checksum for the update tool on different test stations.	
+		    Result/Outcome: The updated ERRORCODE_INFO.csv file and checksum were successfully verified on each test station, ensuring consistent tool operation.
+29/10
+        1   Read the Kazam documentation and the project source code.
+		    Result/Outcome: 
+			Studied the Kazam plugin architecture and learned the folder structure and configuration requirements for project setup on individual test stations.
+			Learned how to apply and configure test commands in the test plan.
+		2   Practiced verifying the Maverick product through the execution of fundamental test commands.
+		    Result/Outcome: Verified successfully. Communicated successfully using basic commands.
+30/10   1   Practiced configuring the test plan on the BFT station and used various functions to modify and adjust the test scenario.	
+31/10       Result/Outcome: 
+			Successfully performed testing through direct command execution via adb shell.	
+			Adjusted the test scenario and successfully validated it using the following Kazam functions.
+1/11    1   Implemented a C# console application to establish communication with the DUT and perform basic functional control operations.
+            Result/Outcome: 
+			Thêm loại máy điều khiển
+			Successfully implemented machine control via the C# console application, including power on/off operations, voltage measurement functions, ...
+
+3/11    1   Worked on adjusting the data frame format transmitted to the SFC system after obtaining the test result.
+            Result/Outcome:
+			The task is still in progress. Mr. Công has taken over and is addressing it promptly to ensure it meets the deadline.
+4/11	1   Flashed software to the board via fastboot. 
+5/11    2   Prepared a Kazam TestPlan to execute the DRDT program.
+     		Result/Outcome:
+			Acquired a clear understanding of the procedure and successfully completed software flashing, then executed the DDRT program for the board. The unit is now ready for long-duration soak testing in the next phase.
+6/11    1   Studied and analyzed the plugin functions in Kazam. 
+        2   Initially built a C# program framework for use in NPI test systems.
+		    Result/Outcome:
+			Understood and applied most of the functions used in the Kazam TestPlan.
+			Understood the workflow and operation of the system. The program development is still in its early stages.
+7/11    1   Described the interaction workflow between the ROBOT and TE using a flowchart. 
+        2   Reviewed the TE C++ source code to modify the communication workflow between the TE and the ROBOT.
+		    Result/Outcome:	
+			Gained a clear understanding of the overall system operation, including TE, ROBOT, KAZAM, and DUT, and successfully described it in a flowchart.
+			The modification of the C++ source code was suspended following management’s decision to replace the existing C++ program with a new PYTHON implementation.
+8/11	1   Carried out the subsequent step of the DRDT process following the long-duration soak test, focusing on collecting and storing the corresponding test logs.
+        2   Improved the TestPlan and attempted to integrate the software flashing step into the Kazam program for automatic execution.
+		    Result/Outcome:	
+			Successfully collected and saved the logs.
+			The integration of the automatic software flashing step into Kazam was not successful. The program did not function as expected.
